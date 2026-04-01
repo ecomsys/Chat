@@ -1,6 +1,7 @@
 import { type FC, useState, useCallback } from "react";
 import { useAuth } from "@/app/providers/auth/useAuth";
 import { useDropzone } from "react-dropzone";
+import { generateId } from "@/utils/generate";
 
 type AuthModalProps = {
   type: "login" | "register";
@@ -43,8 +44,8 @@ export const AuthModal: FC<AuthModalProps> = ({ type, isOpen, onClose }) => {
   };
 
   // ===== ВАЛИДАЦИЯ =====
-  const isNicknameValid = nickname.trim().length >= 5;
-  const isPasswordValid = password.trim().length >= 5;
+  const isNicknameValid = nickname.trim().length >= 3;
+  const isPasswordValid = password.trim().length >= 3;
 
   const handleNicknameChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let val = e.target.value;
@@ -61,7 +62,7 @@ export const AuthModal: FC<AuthModalProps> = ({ type, isOpen, onClose }) => {
     setTouched(true);
 
     if (!isNicknameValid || !isPasswordValid) {
-      setError("Минимум 5 символов");
+      setError("Минимум 3 символов");
       return;
     }
 
@@ -88,12 +89,12 @@ export const AuthModal: FC<AuthModalProps> = ({ type, isOpen, onClose }) => {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30">
-      <div className="relative modal-bg bg-gray-800 md:rounded-[20px] max-w-[500px] w-full px-[30px] py-[80px] sm:p-[60px] flex flex-col items-center text-center">
+      <div className="relative border border-white modal-bg bg-gray-800 md:rounded-[20px] max-w-[500px] w-full px-[30px] py-[80px] sm:p-[60px] flex flex-col items-center text-center">
 
         {/* закрыть */}
         <button
           onClick={onClose}
-          className="absolute top-[20px] right-[20px] text-white text-[24px] hover:text-gray-300"
+          className="absolute top-[20px] right-[30px] text-white text-[24px] hover:text-gray-300 cursor-pointer"
         >
           ✕
         </button>
@@ -111,7 +112,7 @@ export const AuthModal: FC<AuthModalProps> = ({ type, isOpen, onClose }) => {
             <div className="flex justify-center relative w-full">
               <div
                 {...getRootProps()}
-                className={`border-2 border-dashed rounded-full w-36 h-36 flex items-center justify-center cursor-pointer overflow-hidden
+                className={`relative border-2 border-dashed rounded-full w-36 h-36 flex items-center justify-center cursor-pointer
                 ${!avatarFile && touched ? "border-red-300" : "border-gray-300"}`}
               >
                 <input {...getInputProps()} />
@@ -121,12 +122,12 @@ export const AuthModal: FC<AuthModalProps> = ({ type, isOpen, onClose }) => {
                     <img
                       src={avatarPreview}
                       alt="avatar"
-                      className="w-full h-full object-cover rounded-full"
+                      className="w-full h-full object-cover rounded-full "
                     />
                     <button
                       type="button"
                       onClick={handleRemoveAvatar}
-                      className="z-10 absolute top-1 right-1 bg-white rounded-full w-7 h-7 flex items-center justify-center text-gray-700 shadow-md"
+                      className="cursor-pointer absolute top-0 -right-5 -translate-x-1/4 -translate-y-1/4 bg-white rounded-full w-7 h-7 flex items-center justify-center text-gray-700 shadow-md z-10"
                     >
                       ✕
                     </button>
@@ -147,9 +148,11 @@ export const AuthModal: FC<AuthModalProps> = ({ type, isOpen, onClose }) => {
           <input
             type="text"
             placeholder="Никнейм"
+            name={generateId()}
             value={nickname}
+            autoComplete="off"
             onChange={handleNicknameChange}
-            className={`rounded-[30px] py-[15px] px-[30px] text-[14px] w-full text-white transition-colors focus:outline-gray-300
+            className={`bg-black/75 rounded-[30px] py-[15px] px-[30px] text-[14px] w-full text-white transition-colors focus:outline-gray-300
             ${touched && !isNicknameValid ? "border border-red-300" : "border border-gray-300"}`}
             required
           />
@@ -159,11 +162,13 @@ export const AuthModal: FC<AuthModalProps> = ({ type, isOpen, onClose }) => {
             type="password"
             placeholder="Пароль"
             value={password}
+            name={generateId()}
+            autoComplete="new-password"
             onChange={(e) => {
               setPassword(e.target.value);
               setError("");
             }}
-            className={`rounded-[30px] py-[15px] px-[30px] text-[14px] w-full text-white transition-colors focus:outline-gray-300
+            className={`bg-black/75 rounded-[30px] py-[15px] px-[30px] text-[14px] w-full text-white transition-colors focus:outline-gray-300
             ${touched && !isPasswordValid ? "border border-red-300" : "border border-gray-300"}`}
             required
           />
@@ -177,10 +182,25 @@ export const AuthModal: FC<AuthModalProps> = ({ type, isOpen, onClose }) => {
 
           <button
             type="submit"
-            className="mt-[20px] w-full py-[15px] rounded-[30px] text-white bg-gradient-to-r from-[#f4a77f] to-[#ee7c7f] hover:brightness-105 active:scale-95"
+            className="
+    mt-[20px] 
+    w-full 
+    py-[15px] 
+    rounded-[30px] 
+    text-white 
+    bg-gradient-to-r from-[#ff6a3d] to-[#ff3f5e] 
+    shadow-lg 
+    hover:brightness-110 
+    active:scale-95 
+    transition 
+    duration-200 
+    ease-in-out cursor-pointer
+  "
           >
             {type === "login" ? "Войти" : "Зарегистрироваться"}
           </button>
+
+
         </form>
       </div>
     </div>

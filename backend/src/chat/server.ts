@@ -1,37 +1,30 @@
-import type { Server as SocketServer } from "socket.io";
+import { Server as SocketServer } from "socket.io";
 import jwt from "jsonwebtoken";
-import {
-  chatStore,
-  createOrUpdateUser,
-  disconnectUserSocket,
-  getUserBySocket,
-  getOrCreateDialog,
-  getUserDialogs,
-  getDialogMessages,
-  addMessage,
-  deleteMessage,
-  markMessageSeen,
-  setTyping,
-  stopTyping,
-} from "./chat.store.js";
-
-import type {
-  ClientToServerEvents,
-  ServerToClientEvents,
-  UserID,
-  User,
-} from "../types.js";
-
 import { JWT_ACCESS_SECRET } from "../config.js";
-import { getUserById, updateUserProfile } from "../db/user.db.js"; // модуль БД
+import {
+  getUserById,
+  getAllUsersFromDB,
+  setUserOnlineStatus,
+} from "../db/user.db.js";
+import type { ServerUser, SafeUser } from "../types.js";
 
-/**
- * Инициализация Chat Server
- */
-export const initChatServer = (
-  io: SocketServer<ClientToServerEvents, ServerToClientEvents>,
-) => {
-  // ================= Middleware: JWT =================
+// ================== CHAT SERVER ==================
+export const initChatServer = (io: SocketServer) => {
+  // -------- Микрофункция: превращает ServerUser в SafeUser --------
+  const toSafeUser = (user: ServerUser): SafeUser => ({
+    id: user.id,
+    username: user.username,
+    first_name: user.first_name,
+    last_name: user.last_name,
+    photo_url: user.photo_url,
+    bio: user.bio,
+    email: user.email,
+    createdAt: user.createdAt,
+    online: user.online ?? false,
+    lastSeen: user.lastSeen ?? 0,
+  });
+
+  // -------- JWT Middleware --------
   io.use((socket, next) => {
     const cookie = socket.handshake.headers.cookie;
     if (!cookie) return next(new Error("Unauthorized"));
@@ -49,150 +42,79 @@ export const initChatServer = (
       };
       socket.data.userId = payload.userId;
       next();
-    } catch (err) {
+    } catch {
       return next(new Error("Unauthorized: invalid token"));
     }
   });
 
+  // -------- Polling для новых пользователей --------
+  let lastUserCount = getAllUsersFromDB().length;
+  const POLLING_INTERVAL = 5000; // 5 секунд
+
+  setInterval(() => {
+    const users = getAllUsersFromDB();
+    if (users.length !== lastUserCount) {
+      lastUserCount = users.length;
+
+      // Отправляем всем клиентам актуальный список пользователей
+      io.emit("users_list", users.map(toSafeUser));
+    }
+  }, POLLING_INTERVAL);
+
+  // -------- CONNECTION --------
   io.on("connection", (socket) => {
     const userId = socket.data.userId as string;
-    console.log("New websocket connected:", socket.id, "userId:", userId);
+    console.log("Connected:", socket.id, userId);
 
-    const dbUser = getUserById(userId);
-    if (!dbUser) {
-      console.log("User not found in DB:", userId);
-      return socket.disconnect();
-    }
+    // =====  Получаем пользователя из БД =====
+    const dbUser: ServerUser | null = getUserById(userId);
+    if (!dbUser) return socket.disconnect();
 
-    // Создаем/обновляем пользователя в сторе при подключении
-    createOrUpdateUser(dbUser, socket.id);
+    // ==== Запрос фронта: юзер логинится =====
+    socket.on("user_login", () => {
+      const onlineUser = setUserOnlineStatus(userId, true);
+      console.log("User loggined:", onlineUser?.username);
 
-    // Отправляем список диалогов сразу после подключения
-    const dialogs = getUserDialogs(userId);
-    socket.emit("dialogs_list", dialogs);
+      // всем сообщаем, что этот юзер онлайн
+      io.emit(
+        "user_status_updated",
+        onlineUser ? toSafeUser(onlineUser) : null,
+      );
 
-    // ================= register_user =================
-    // Фронт шлёт это после появления user в AuthProvider
-    socket.on("register_user", () => {
-      const userId = socket.data.userId;
-      if (!userId) return;
-
-      const dbUser = getUserById(userId); // берем актуальные данные
-      if (!dbUser) return;
-
-      const user = createOrUpdateUser(dbUser, socket.id);
-      socket.broadcast.emit("user_online", user.id);
-    });
-    // ================= Socket Events =================
-
-    // -------- GET DIALOGS --------
-    socket.on("get_dialogs", () => {
-      const user = getUserBySocket(socket.id);
-      if (!user) return;
-      socket.emit("dialogs_list", getUserDialogs(user.id));
+      const allUsers: SafeUser[] = getAllUsersFromDB().map(toSafeUser);
+      socket.emit("users_list", allUsers);
     });
 
-    // -------- OPEN DIALOG --------
-    socket.on("open_dialog", (otherUserId: UserID) => {
-      const user = getUserBySocket(socket.id);
-      if (!user) return;
+    // ==== Запрос фронта: юзер разлогинился =====
+    socket.on("user_logout", () => {
+      const offlineUser = setUserOnlineStatus(userId, false);
+      console.log("User logged out:", offlineUser?.username);
 
-      const dialog = getOrCreateDialog(user.id, otherUserId);
-      const messages = getDialogMessages(dialog.id);
+      // всем сообщаем, что этот юзер оффлайн
+      io.emit(
+        "user_status_updated",
+        offlineUser ? toSafeUser(offlineUser) : null,
+      );
 
-      // Присоединяем пользователя к комнате диалога
-      socket.join(dialog.id);
-
-      socket.emit("messages_list", dialog.id, messages);
+      // можно сразу закрыть сокет, если нужно
+      socket.disconnect(true);
     });
 
-    // -------- SEND MESSAGE --------
-    socket.on("send_message", (data) => {
-      const user = getUserBySocket(socket.id);
-      if (!user) return;
-
-      const message = addMessage({
-        dialogId: data.dialogId,
-        senderId: user.id,
-        type: data.type,
-        text: data.text,
-        attachments: data.attachments,
-      });
-
-      // Отправляем сообщение всем участникам комнаты
-      io.to(data.dialogId).emit("new_message", message);
+    // ===== Запрос фронта: отдать список пользователей =====
+    socket.on("get_users", () => {
+      const users: SafeUser[] = getAllUsersFromDB().map(toSafeUser);
+      socket.emit("users_list", users);
     });
 
-    // -------- DELETE MESSAGE --------
-    socket.on("delete_message", (messageId, dialogId) => {
-      deleteMessage(messageId, dialogId);
-      io.to(dialogId).emit("message_deleted", messageId, dialogId);
-    });
-
-    // -------- TYPING --------
-    socket.on("typing_start", (dialogId) => {
-      const user = getUserBySocket(socket.id);
-      if (!user) return;
-
-      setTyping(dialogId, user.id);
-      io.to(dialogId).emit("user_typing", { dialogId, userId: user.id });
-    });
-
-    socket.on("typing_stop", (dialogId) => {
-      const user = getUserBySocket(socket.id);
-      if (!user) return;
-
-      stopTyping(dialogId, user.id);
-      io.to(dialogId).emit("user_stop_typing", { dialogId, userId: user.id });
-    });
-
-    // -------- MESSAGE SEEN --------
-    socket.on("message_seen", (dialogId) => {
-      const user = getUserBySocket(socket.id);
-      if (!user) return;
-
-      markMessageSeen(dialogId, user.id);
-      io.to(dialogId).emit("messages_seen", dialogId, user.id);
-    });
-
-    // -------- UPDATE USER PROFILE --------
-
-    socket.on(
-      "update_user",
-      (
-        updatedData: Partial<
-          Omit<
-            User,
-            "id" | "password" | "sockets" | "online" | "lastSeen" | "typingIn"
-          >
-        >,
-      ) => {
-        const user = getUserBySocket(socket.id);
-        if (!user) return;
-
-        // ---- Обновляем профиль в БД ----
-        const updatedDbUser = updateUserProfile(user.id, updatedData);
-        if (!updatedDbUser) return;
-
-        // ---- Обновляем стор ----
-        const updatedUser = createOrUpdateUser(updatedDbUser, socket.id);
-
-        // ---- Рассылаем обновленного юзера всем ----
-        socket.broadcast.emit("user_updated", updatedUser);
-        socket.emit("user_updated", updatedUser);
-      },
-    );
-
-    // -------- DISCONNECT --------
+    // =====  DISCONNECT =====
     socket.on("disconnect", () => {
-      const user = disconnectUserSocket(socket.id);
-      if (user) {
-        socket.broadcast.emit(
-          "user_offline",
-          user.id,
-          user.lastSeen ?? Date.now(),
-        );
-      }
+      const offlineUser = setUserOnlineStatus(userId, false);
+      console.log("User offline:", offlineUser?.username);
+
+      io.emit(
+        "user_status_updated",
+        offlineUser ? toSafeUser(offlineUser) : null,
+      );
     });
   });
 };

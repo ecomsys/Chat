@@ -38,7 +38,7 @@ export const MainPage = () => {
 
       {/* Здесь можно вставить слайдер или любой контент главной */}
       <div className="relative z-1 text-white text-center max-w-[600px] px-4">
-        <h1 className="text-4xl font-bold mb-4">Добро пожаловать в наш чат!</h1>
+        <h1 className="text-4xl text-white font-bold mb-4">Добро пожаловать в наш чат!</h1>
         <p className="text-lg">
           Чтобы продолжить, пожалуйста, войдите или зарегистрируйтесь.
           После авторизации вы сразу попадете в чат.
