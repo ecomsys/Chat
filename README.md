@@ -7,7 +7,7 @@
 1. Клонируем репозиторий:
 
 ```
-git clone https://github.com/ecomsys/chat.git
+git clone https://github.com/ecomsys/Chat.git
 cd <имя_папки_репозитория>
 ```
 
